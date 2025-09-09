@@ -1,0 +1,5 @@
+{
+  "name": "MediCare Companion",
+  "description": "A senior-friendly medication reminder application designed for simplicity and ease of use. It helps users track their medications, identify pills with a photo, and provides a clear schedule for daily doses.",
+  "requestFramePermissions": []
+}
