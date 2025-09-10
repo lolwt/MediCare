@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useContext, useEffect, useRef } from 'react';
 import { NewMedication } from '../types';
 import { identifyPill } from '../services/geminiService';
-import { ArrowLeftIcon, CameraIcon, CloseIcon, SpinnerIcon } from './Icons';
+import { ArrowLeftIcon, CameraIcon, CloseIcon, PillIcon, SpinnerIcon, VideoCameraIcon } from './Icons';
 import { MedicationContext } from '../contexts/MedicationContext';
 
 interface AddMedicationModalProps {
@@ -25,23 +25,44 @@ const AddMedicationModal: React.FC<AddMedicationModalProps> = ({ onClose }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [identificationResult, setIdentificationResult] = useState('');
   
+  // Camera state
+  const [isCameraOpen, setCameraOpen] = useState(false);
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
   const firstInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    firstInputRef.current?.focus();
-  }, []);
+    if (step === 1 && !isCameraOpen) {
+      firstInputRef.current?.focus();
+    }
+  }, [step, isCameraOpen]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        onClose();
+        if (isCameraOpen) {
+          handleCloseCamera();
+        } else {
+          onClose();
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [onClose]);
+  }, [onClose, isCameraOpen]);
+
+  // Cleanup for camera stream
+  useEffect(() => {
+    return () => {
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [cameraStream]);
   
   const handleNext = () => setStep(prev => prev + 1);
   const handleBack = () => setStep(prev => prev - 1);
@@ -79,7 +100,67 @@ const AddMedicationModal: React.FC<AddMedicationModalProps> = ({ onClose }) => {
     }
   };
 
+  const handleOpenCamera = async () => {
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+        setCameraStream(stream);
+        setCameraOpen(true);
+      } catch (err) {
+        console.error("Error accessing camera: ", err);
+        alert("Could not access the camera. Please check permissions in your browser settings.");
+      }
+    } else {
+      alert("Your browser does not support camera access.");
+    }
+  };
+
+  const handleCloseCamera = () => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(track => track.stop());
+    }
+    setCameraStream(null);
+    setCameraOpen(false);
+  };
+
+  const handleTakePicture = () => {
+    if (videoRef.current && canvasRef.current) {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      
+      const context = canvas.getContext('2d');
+      if (context) {
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const imageType = 'image/jpeg';
+        const dataUrl = canvas.toDataURL(imageType, 0.9);
+        
+        setPillImage(dataUrl);
+        setPillImageType(imageType);
+      }
+      
+      handleCloseCamera();
+    }
+  };
+
   const renderStep = () => {
+    if (isCameraOpen) {
+      return (
+        <div>
+          <h3 className="text-3xl font-bold mb-6 text-center">Take a Photo</h3>
+          <div className="relative rounded-lg overflow-hidden shadow-lg bg-gray-900">
+            <video ref={videoRef} autoPlay playsInline muted className="w-full h-auto aspect-[4/3] object-cover"></video>
+            <canvas ref={canvasRef} className="hidden"></canvas>
+          </div>
+        </div>
+      );
+    }
+
     switch (step) {
       case 1:
         return (
@@ -104,18 +185,27 @@ const AddMedicationModal: React.FC<AddMedicationModalProps> = ({ onClose }) => {
           <div>
             <h3 className="text-3xl font-bold mb-6 text-center">Step 3: Pill Photo (Optional)</h3>
             <div className="flex flex-col items-center">
-              <label htmlFor="pill-photo" className="cursor-pointer flex flex-col items-center gap-4 bg-gray-100 p-8 rounded-lg border-2 border-dashed border-gray-400 hover:bg-gray-200 hover:border-blue-500">
-                {pillImage ? (
-                  <img src={pillImage} alt="Pill preview" className="h-40 w-40 rounded-full object-cover" />
+              {pillImage ? (
+                  <img src={pillImage} alt="Pill preview" className="h-40 w-40 rounded-full object-cover mb-4 border-4 border-white shadow-md" />
                 ) : (
-                  <>
-                    <CameraIcon className="h-20 w-20 text-gray-500" />
-                    <span className="text-xl text-gray-700 font-semibold">Take or Upload Photo</span>
-                  </>
+                  <div className="w-40 h-40 bg-gray-100 rounded-full flex items-center justify-center mb-4 border-2 border-dashed border-gray-400">
+                    <PillIcon className="h-20 w-20 text-gray-400" />
+                  </div>
                 )}
-              </label>
-              <input id="pill-photo" type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
               
+              <div className="flex items-center gap-4">
+                <label htmlFor="pill-photo" className="cursor-pointer flex items-center gap-3 bg-gray-200 p-4 rounded-lg border-2 border-transparent hover:bg-gray-300 hover:border-blue-500 font-semibold text-xl text-gray-800 transition-colors">
+                  <CameraIcon className="h-8 w-8 text-gray-600" />
+                  <span>Upload</span>
+                </label>
+                <input id="pill-photo" type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
+                
+                <button onClick={handleOpenCamera} className="cursor-pointer flex items-center gap-3 bg-gray-200 p-4 rounded-lg border-2 border-transparent hover:bg-gray-300 hover:border-blue-500 font-semibold text-xl text-gray-800 transition-colors">
+                  <VideoCameraIcon className="h-8 w-8 text-gray-600" />
+                  <span>Use Camera</span>
+                </button>
+              </div>
+
               {pillImage && (
                 <button onClick={handleIdentifyPill} disabled={isLoading} className="mt-6 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xl py-4 px-8 rounded-lg shadow-md disabled:bg-gray-400 flex items-center gap-2">
                   {isLoading ? <><SpinnerIcon /> Identifying...</> : 'Identify This Pill'}
@@ -151,27 +241,40 @@ const AddMedicationModal: React.FC<AddMedicationModalProps> = ({ onClose }) => {
             <CloseIcon className="h-10 w-10 text-gray-600" />
           </button>
         </div>
-        <p className="text-center text-xl text-gray-500 font-semibold mb-6">Step {step} of 3</p>
+        {!isCameraOpen && <p className="text-center text-xl text-gray-500 font-semibold mb-6">Step {step} of 3</p>}
         
         <div className="min-h-[300px]">
           {renderStep()}
         </div>
 
         <div className="mt-8 flex justify-between items-center">
-          {step > 1 ? (
-            <button onClick={handleBack} className="flex items-center gap-2 text-xl font-bold py-4 px-6 rounded-lg bg-gray-200 hover:bg-gray-300">
-              <ArrowLeftIcon /> Back
-            </button>
-          ) : <div></div>}
-          
-          {step < 3 ? (
-            <button onClick={handleNext} disabled={!canProceed()} className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xl py-4 px-6 rounded-lg disabled:bg-gray-400">
-              Next Step
-            </button>
+          {isCameraOpen ? (
+             <>
+              <button onClick={handleCloseCamera} className="flex items-center gap-2 text-xl font-bold py-4 px-6 rounded-lg bg-gray-200 hover:bg-gray-300">
+                <ArrowLeftIcon /> Cancel
+              </button>
+              <button onClick={handleTakePicture} className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xl py-4 px-6 rounded-lg flex items-center gap-2">
+                <CameraIcon className="h-7 w-7"/> Take Picture
+              </button>
+            </>
           ) : (
-            <button onClick={handleSubmit} disabled={!canProceed()} className="bg-green-600 hover:bg-green-700 text-white font-bold text-xl py-4 px-6 rounded-lg disabled:bg-gray-400">
-              Save Medication
-            </button>
+            <>
+              {step > 1 ? (
+                <button onClick={handleBack} className="flex items-center gap-2 text-xl font-bold py-4 px-6 rounded-lg bg-gray-200 hover:bg-gray-300">
+                  <ArrowLeftIcon /> Back
+                </button>
+              ) : <div></div>}
+              
+              {step < 3 ? (
+                <button onClick={handleNext} disabled={!canProceed()} className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xl py-4 px-6 rounded-lg disabled:bg-gray-400">
+                  Next Step
+                </button>
+              ) : (
+                <button onClick={handleSubmit} disabled={!canProceed()} className="bg-green-600 hover:bg-green-700 text-white font-bold text-xl py-4 px-6 rounded-lg disabled:bg-gray-400">
+                  Save Medication
+                </button>
+              )}
+            </>
           )}
         </div>
       </div>
